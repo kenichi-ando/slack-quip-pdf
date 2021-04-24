@@ -150,8 +150,7 @@ def listThreads(say, threads, header):
 
     say(blocks=blocks)
 
-# Listens to incoming messages that contain "hello"
-@app.command("/qtp")
+@app.command("/quiptopdf")
 def command_quip_to_pdf(ack, say, command):
     ack()
 

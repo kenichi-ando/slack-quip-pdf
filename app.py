@@ -13,45 +13,84 @@ app = App(
     signing_secret=os.environ.get("SLACK_SIGNING_SECRET")
 )
 
-def requestGet(url):
-    print("GET " + url)
-    return requests.get(url, headers={"Authorization": "Bearer " + quip_access_token})
+user_id_to_name_cache = {}
 
-def requestPost(url):
-    print("POST " + url)
-    return requests.post(url, headers={"Authorization": "Bearer " + quip_access_token})
+def auth():
+    return {"Authorization": "Bearer " + quip_access_token}
 
-def verifyAccessToken(say, token):
+def request(url, isPost=False):
+    if isPost:
+        print("POST " + url)
+        return requests.post(url, headers=auth())
+    else:
+        print("GET " + url)
+        return requests.get(url, headers=auth())
+
+def verify_access_token(say):
     global quip_access_token
-    quip_access_token = token
-    if requestGet("https://platform.quip.com/1/oauth/verify_token").status_code != 200:
-        quip_access_token = None
-        say("The access token is invalid.")
-        return False
-    say("Verified the access token successfully.")
+
+    if quip_access_token == None:
+        if os.environ.get("QUIP_ACCESS_TOKEN") != None:
+            quip_access_token = os.environ.get("QUIP_ACCESS_TOKEN")
+            if request("https://platform.quip.com/1/oauth/verify_token").status_code != 200:
+                quip_access_token = None
+                say("The Quip access token is invalid.")
+                return False
+        else:
+            say("Please set your Quip access token to QUIP_ACCESS_TOKEN environment variable. You can get it from https://quip.com/dev/token.")
+            return False
+
     return True
 
-def getUsers(user_ids):
-    return requestGet("https://platform.quip.com/1/users/?ids=" + ",".join(user_ids)).json()
+def get_users(user_ids):
+    global user_id_to_name_cache
+    request_user_ids = []
+    for uid in user_ids:
+        if uid in user_id_to_name_cache:
+            continue
+        request_user_ids.append(uid)
+    data = request("https://platform.quip.com/1/users/?ids=" + ",".join(request_user_ids)).json()
+    for uid in request_user_ids:
+        user_id_to_name_cache[uid] = data[uid]["name"]
 
-def searchDocuments(say, query):
-    body = requestGet("https://platform.quip.com/1/threads/search?only_match_titles=true&count=10&query="
+def search_threads(say, query):
+    body = request("https://platform.quip.com/1/threads/search?only_match_titles=true&count=10&query="
             + requests.utils.quote(query)).json()
 
     if len(body) == 1:
-        createPdfRequest(say, body[0])
+        request_pdf(say, body[0])
     else:
-        listThreads(say, body, "Search Results - " + query)
+        list_threads(say, body, "Search Results - " + query)
 
-def recentDocuments(say):
-    body = requestGet("https://platform.quip.com/1/threads/recent").json()
+def recent_threads(say):
+    body = request("https://platform.quip.com/1/threads/recent").json()
     arr = []
     for tid in body:
         arr.append(body[tid])
-    listThreads(say, arr, "Recent Documents")
+    list_threads(say, arr, "Recent Documents")
 
-def createPdfRequest(say, thread):
-    data = requestPost("https://platform.quip.com/1/threads/" + thread["thread"]["id"] + "/export/pdf/async").json()
+def request_pdf_by_thread_id(say, thread_id):
+    thread = get_thread(thread_id)
+    if thread:
+        request_pdf(say, thread)
+        return True
+    return False
+
+def request_pdf(say, thread):
+    data = request("https://platform.quip.com/1/threads/" + thread["thread"]["id"] + "/export/pdf/async", True).json()
+    if "request_id" not in data:
+        say("Failed to create a PDF.")
+        return
+
+    print("Request ID:", data["request_id"])
+
+    get_users([thread["thread"]["author_id"]])
+    text = "<{}|{}> `{}` _{}_".format(
+        thread["thread"]["link"],
+        thread["thread"]["title"],
+        thread["thread"]["id"],
+        user_id_to_name_cache[thread["thread"]["author_id"]])
+
     say(
         blocks = [
             {
@@ -62,44 +101,54 @@ def createPdfRequest(say, thread):
                 }
             },
             {
-                "type": "divider"
-            },
-            {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": "Title: <{}|{}>\nThread ID: {}\nRequest ID: {}".format(
-                    thread["thread"]["link"],
-                    thread["thread"]["title"],
-                    thread["thread"]["id"],
-                    data["request_id"])}
+                "text": {"type": "mrkdwn", "text": text},
             }
         ]
     )
     for _ in range(20):
         time.sleep(3)
-        if checkPdfStatus(say, thread, data["request_id"]):
+        if check_pdf_status(say, thread, data["request_id"]):
             return
     say("Timed out...")
 
-def checkPdfStatus(say, thread, request_id):
-    data = requestGet("https://platform.quip.com/1/threads/" + thread["thread"]["id"] + "/export/pdf/async?request_id=" + request_id).json()
+def check_pdf_status(say, thread, request_id):
+    data = request("https://platform.quip.com/1/threads/" + thread["thread"]["id"] + "/export/pdf/async?request_id=" + request_id).json()
     status = data["status"]
     if status == "PROCESSING":
         return False
-    elif status == "SUCCESS":
-        say("Generated PDF: " + data["pdf_url"])
-    elif status == "PARTIAL_SUCCESS":
-        say("Generated PDF partially: " + data["pdf_url"] + " (" + data["message"] + ")")
+    elif status == "SUCCESS" or status == "PARTIAL_SUCCESS":
+        text = "Download PDF"
+        if status == "PARTIAL_SUCCESS":
+            text += " (" + data["message"] + ")"
+        say(blocks = [
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {
+                            "type": "plain_text",
+                            "text": "Download PDF"
+                        },
+                        "action_id": "download-pdf",
+                        "style": "primary",
+                        "url": data["pdf_url"]
+                    }
+                ]
+            }
+        ])
     elif status == "FAILURE":
-        say("Failed to export PDF " + data["message"])
+        say("Failed to export PDF: " + data["message"])
     return True
 
-def getThread(thread_id):
-    resp = requestGet("https://platform.quip.com/1/threads/" + thread_id)
+def get_thread(thread_id):
+    resp = request("https://platform.quip.com/1/threads/" + thread_id)
     if resp.status_code == 200:
         return resp.json()
     return None
 
-def listThreads(say, threads, header):
+def list_threads(say, threads, header):
     blocks = [
             {
                 "type": "header",
@@ -124,29 +173,35 @@ def listThreads(say, threads, header):
     user_ids = []
     for thread in threads:
         user_ids.append(thread["thread"]["author_id"])
-    users = getUsers(user_ids)
+    get_users(user_ids)
 
     i = 0
     for thread in threads:
-        if thread["thread"]["type"] != "document":
-            continue
         i += 1
-        text = "{}. [{}] <{}|{}> (Author: {})\n".format(
+        text = "{}. <{}|{}> `{}` _{}_".format(
             i,
-            thread["thread"]["id"],
             thread["thread"]["link"],
             thread["thread"]["title"],
-            users[thread["thread"]["author_id"]]["name"])
-        blocks.append(
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": text},
-                "accessory": {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": "PDF"},
-                    "action_id": "button_click"
-                }
-            })
+            thread["thread"]["id"],
+            user_id_to_name_cache[thread["thread"]["author_id"]])
+        if thread["thread"]["type"] == "document":
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": text},
+                    "accessory": {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Export to PDF"},
+                        "value": thread["thread"]["id"],
+                        "action_id": "export-pdf"
+                    }
+                })
+        else:
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": text}
+                })
 
     say(blocks=blocks)
 
@@ -154,23 +209,32 @@ def listThreads(say, threads, header):
 def command_quip_to_pdf(ack, say, command):
     ack()
 
-    if quip_access_token == None:
-        if "text" in command:
-            verifyAccessToken(say, command["text"])
-        else:
-            say("Please specify your Quip access token. You can get it from https://quip.com/dev/token.")
+    if not verify_access_token(say):
         return
 
     if "text" in command:
         arg = command["text"]
         if len(arg) == 11 or len(arg) == 12:
-            thread = getThread(arg)
-            if thread:
-                createPdfRequest(say, thread)
+            if request_pdf_by_thread_id(say, arg):
                 return
-        searchDocuments(say, command["text"])
+        search_threads(say, command["text"])
     else:
-        recentDocuments(say)
+        recent_threads(say)
+
+@app.action("export-pdf")
+def export_button_click(body, ack, say):
+    ack()
+
+    if not verify_access_token(say):
+        return
+
+    thread_id = body["actions"][0]["value"]
+    if not request_pdf_by_thread_id(say, thread_id):
+        say("Thread ID {} not found.".format(thread_id))
+
+@app.action("download-pdf")
+def download_button_click(body, ack, say):
+    ack()
 
 # Start your app
 if __name__ == "__main__":

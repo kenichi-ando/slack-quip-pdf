@@ -17,8 +17,10 @@ app = App(
 
 user_id_to_name_cache = {}
 
+
 def auth():
     return {"Authorization": "Bearer " + quip_access_token}
+
 
 def request(url, isPost=False):
     if isPost:
@@ -27,6 +29,7 @@ def request(url, isPost=False):
     else:
         print("GET " + url)
         return requests.get(url, headers=auth())
+
 
 def verify_access_token(say):
     global quip_access_token
@@ -44,42 +47,34 @@ def verify_access_token(say):
 
     return True
 
+
 def get_users(user_ids):
     global user_id_to_name_cache
     request_user_ids = []
     for uid in user_ids:
-        if uid in user_id_to_name_cache:
-            continue
-        request_user_ids.append(uid)
-    data = request("https://platform.quip.com/1/users/?ids=" + ",".join(request_user_ids)).json()
+        if uid not in user_id_to_name_cache:
+            request_user_ids.append(uid)
+    if len(request_user_ids) == 0:
+        return
+    data = request("https://platform.quip.com/1/users/?ids=" +
+                   ",".join(request_user_ids)).json()
     for uid in request_user_ids:
         user_id_to_name_cache[uid] = data[uid]["name"]
 
-def search_threads(say, client, channel_id, query):
-    body = request("https://platform.quip.com/1/threads/search?only_match_titles=true&count=10&query="
-            + quote(query)).json()
 
-    if len(body) == 1:
-        request_pdf(say, client, channel_id, body[0])
-    else:
-        list_threads(say, body, "Search Results - " + query)
+def search_threads(query):
+    return request("https://platform.quip.com/1/threads/search?only_match_titles=true&count=10&query="
+                   + quote(query)).json()
 
-def recent_threads(say):
+
+def recent_threads():
     body = request("https://platform.quip.com/1/threads/recent").json()
-    arr = []
-    for tid in body:
-        arr.append(body[tid])
-    list_threads(say, arr, "Recent Documents")
+    return list(map(lambda tid: body[tid], body))
 
-def request_pdf_by_thread_id(say, client, channel_id, thread_id):
-    thread = get_thread(thread_id)
-    if thread:
-        request_pdf(say, client, channel_id, thread)
-        return True
-    return False
 
 def request_pdf(say, client, channel_id, thread):
-    data = request("https://platform.quip.com/1/threads/" + thread["thread"]["id"] + "/export/pdf/async", True).json()
+    data = request("https://platform.quip.com/1/threads/" +
+                   thread["thread"]["id"] + "/export/pdf/async", True).json()
     if "request_id" not in data:
         say("Failed to create a PDF.")
         return
@@ -87,35 +82,42 @@ def request_pdf(say, client, channel_id, thread):
     print("Request ID:", data["request_id"])
 
     get_users([thread["thread"]["author_id"]])
+
     text = "<{}|{}> `{}` _{}_".format(
         thread["thread"]["link"],
         thread["thread"]["title"],
         thread["thread"]["id"],
         user_id_to_name_cache[thread["thread"]["author_id"]])
 
-    say(
-        blocks = [
-            {
-                "type": "header",
-                "text": {
+    blocks = [
+        {
+            "type": "header",
+            "text": {
                     "type": "plain_text",
                     "text": "Exporting PDF"
-                }
-            },
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": text},
             }
-        ]
-    )
-    for _ in range(20):
+        },
+        {
+            "type": "section",
+            "text": {
+                    "type": "mrkdwn",
+                    "text": text
+            },
+        }
+    ]
+    say(blocks=blocks)
+
+    for _ in range(60):
         time.sleep(3)
         if check_pdf_status(say, client, channel_id, thread, data["request_id"]):
             return
+
     say("Timed out...")
 
+
 def check_pdf_status(say, client, channel_id, thread, request_id):
-    data = request("https://platform.quip.com/1/threads/" + thread["thread"]["id"] + "/export/pdf/async?request_id=" + request_id).json()
+    data = request("https://platform.quip.com/1/threads/" +
+                   thread["thread"]["id"] + "/export/pdf/async?request_id=" + request_id).json()
     status = data["status"]
     if status == "PROCESSING":
         return False
@@ -130,38 +132,11 @@ def check_pdf_status(say, client, channel_id, thread, request_id):
         pdf_url = pdf_url[:pdf_url.rindex("name=") + 5] + file_name
         print("PDF URL encoded:", pdf_url)
 
-        """
-        say(blocks = [
-            {
-                "type": "actions",
-                "elements": [
-                    {
-                        "type": "button",
-                        "text": {
-                            "type": "plain_text",
-                            "text": "Download PDF"
-                        },
-                        "action_id": "download-pdf",
-                        "style": "primary",
-                        "url": pdf_url
-                    },
-                    {
-                        "type": "button",
-                        "text": {
-                            "type": "plain_text",
-                            "text": "Attach PDF"
-                        },
-                        "action_id": "attach-pdf",
-                        "value": pdf_url
-                    },
-                ]
-            }
-        ])
-        """
         attach_pdf(say, client, channel_id, pdf_url)
     elif status == "FAILURE":
         say("Failed to export PDF: " + data["message"])
     return True
+
 
 def attach_pdf(say, client, channel_id, pdf_url):
     file_name = pdf_url[pdf_url.rindex("name=") + 5:]
@@ -173,20 +148,21 @@ def attach_pdf(say, client, channel_id, pdf_url):
     pdf_data = request(pdf_url).content
     with open(file_path, "wb") as file:
         file.write(pdf_data)
-        print("File saved: ", file_path)
+        print("File saved: {}".format(file_path))
 
     try:
         result = client.files_upload(
             channels=channel_id,
             title=unquote(file_name),
             file=file_path,
-#            content=pdf_data,
-            filetype="pdf",
+            filetype="pdf"
         )
-        os.remove(file_path)
-
     except SlackApiError as e:
         say("Error uploading PDF: {}".format(e))
+    finally:
+        os.remove(file_path)
+        print("File deleted: {}".format(file_path))
+
 
 def get_thread(thread_id):
     resp = request("https://platform.quip.com/1/threads/" + thread_id)
@@ -194,18 +170,20 @@ def get_thread(thread_id):
         return resp.json()
     return None
 
+
 def list_threads(say, threads, header):
     blocks = [
-            {
-                "type": "header",
-                "text": {
+        {
+            "type": "header",
+            "text": {
                     "type": "plain_text",
                     "text": header
-                }
-            },
-            {
-                "type": "divider"
-            }]
+            }
+        },
+        {
+            "type": "divider"
+        }
+    ]
 
     if len(threads) == 0:
         blocks.append(
@@ -234,23 +212,34 @@ def list_threads(say, threads, header):
             blocks.append(
                 {
                     "type": "section",
-                    "text": {"type": "mrkdwn", "text": text},
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": text
+                        },
                     "accessory": {
                         "type": "button",
-#                        "style": "primary",
-                        "text": {"type": "plain_text", "text": "Export to PDF"},
+                        "text": {
+                            "type": "plain_text",
+                            "text": "Export to PDF"
+                            },
                         "value": thread["thread"]["id"],
                         "action_id": "export-pdf"
                     }
-                })
+                }
+            )
         else:
             blocks.append(
                 {
                     "type": "section",
-                    "text": {"type": "mrkdwn", "text": text}
-                })
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": text
+                        }
+                }
+            )
 
     say(blocks=blocks)
+
 
 @app.command("/quiptopdf")
 def command_quip_to_pdf(ack, say, client, command):
@@ -263,13 +252,23 @@ def command_quip_to_pdf(ack, say, client, command):
     print("channel ID:", channel_id)
 
     if "text" in command:
-        arg = command["text"]
-        if len(arg) == 11 or len(arg) == 12:
-            if request_pdf_by_thread_id(say, client, channel_id, arg):
+        query = command["text"]
+        if len(query) == 11 or len(query) == 12:
+            thread = get_thread(query)
+            if thread:
+                request_pdf(say, client, channel_id, thread)
                 return
-        search_threads(say, client, channel_id, command["text"])
+
+        results = search_threads(command["text"])
+        if len(results) == 1:
+            request_pdf(say, client, channel_id, results[0])
+        else:
+            list_threads(say, results, "Search Results - " + query)
+
     else:
-        recent_threads(say)
+        results = recent_threads()
+        list_threads(say, results, "Recent Documents")
+
 
 @app.action("export-pdf")
 def export_button_click(ack, say, client, body):
@@ -284,30 +283,13 @@ def export_button_click(ack, say, client, body):
 
     print("Thread ID:", thread_id)
     print("channel ID:", channel_id)
-    if not request_pdf_by_thread_id(say, client, channel_id, thread_id):
-        say("Thread ID {} not found.".format(thread_id))
 
-"""
-@app.action("download-pdf")
-def download_button_click(ack):
-    print("=== download_button_click ===")
-    ack()
+    thread = get_thread(thread_id)
+    if thread:
+        request_pdf(say, client, channel_id, thread)
+    else:
+        say("Thread ID {} is not found.".format(thread_id))
 
-@app.action("attach-pdf")
-def attach_button_click(ack, say, body, client):
-    print("=== attach_button_click ===")
-    ack()
-
-    if not verify_access_token(say):
-        return
-
-    pdf_url = body["actions"][0]["value"]
-    channel_id = body["channel"]["id"]
-    print("URL:", pdf_url)
-    print("channel ID:", channel_id)
-
-    attach_pdf(say, client, pdf_url, channel_id)
-"""
 
 # Start your app
 if __name__ == "__main__":

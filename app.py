@@ -55,12 +55,12 @@ def get_users(user_ids):
     for uid in request_user_ids:
         user_id_to_name_cache[uid] = data[uid]["name"]
 
-def search_threads(say, query):
+def search_threads(say, client, channel_id, query):
     body = request("https://platform.quip.com/1/threads/search?only_match_titles=true&count=10&query="
             + quote(query)).json()
 
     if len(body) == 1:
-        request_pdf(say, body[0])
+        request_pdf(say, client, channel_id, body[0])
     else:
         list_threads(say, body, "Search Results - " + query)
 
@@ -71,14 +71,14 @@ def recent_threads(say):
         arr.append(body[tid])
     list_threads(say, arr, "Recent Documents")
 
-def request_pdf_by_thread_id(say, thread_id):
+def request_pdf_by_thread_id(say, client, channel_id, thread_id):
     thread = get_thread(thread_id)
     if thread:
-        request_pdf(say, thread)
+        request_pdf(say, client, channel_id, thread)
         return True
     return False
 
-def request_pdf(say, thread):
+def request_pdf(say, client, channel_id, thread):
     data = request("https://platform.quip.com/1/threads/" + thread["thread"]["id"] + "/export/pdf/async", True).json()
     if "request_id" not in data:
         say("Failed to create a PDF.")
@@ -110,11 +110,11 @@ def request_pdf(say, thread):
     )
     for _ in range(20):
         time.sleep(3)
-        if check_pdf_status(say, thread, data["request_id"]):
+        if check_pdf_status(say, client, channel_id, thread, data["request_id"]):
             return
     say("Timed out...")
 
-def check_pdf_status(say, thread, request_id):
+def check_pdf_status(say, client, channel_id, thread, request_id):
     data = request("https://platform.quip.com/1/threads/" + thread["thread"]["id"] + "/export/pdf/async?request_id=" + request_id).json()
     status = data["status"]
     if status == "PROCESSING":
@@ -130,6 +130,7 @@ def check_pdf_status(say, thread, request_id):
         pdf_url = pdf_url[:pdf_url.rindex("name=") + 5] + file_name
         print("PDF URL encoded:", pdf_url)
 
+        """
         say(blocks = [
             {
                 "type": "actions",
@@ -156,11 +157,13 @@ def check_pdf_status(say, thread, request_id):
                 ]
             }
         ])
+        """
+        attach_pdf(say, client, channel_id, pdf_url)
     elif status == "FAILURE":
         say("Failed to export PDF: " + data["message"])
     return True
 
-def attach_pdf(say, client, pdf_url, channel_id):
+def attach_pdf(say, client, channel_id, pdf_url):
     file_name = pdf_url[pdf_url.rindex("name=") + 5:]
 
     if not os.path.exists("/tmp"):
@@ -234,6 +237,7 @@ def list_threads(say, threads, header):
                     "text": {"type": "mrkdwn", "text": text},
                     "accessory": {
                         "type": "button",
+#                        "style": "primary",
                         "text": {"type": "plain_text", "text": "Export to PDF"},
                         "value": thread["thread"]["id"],
                         "action_id": "export-pdf"
@@ -249,23 +253,26 @@ def list_threads(say, threads, header):
     say(blocks=blocks)
 
 @app.command("/quiptopdf")
-def command_quip_to_pdf(ack, say, body, command):
+def command_quip_to_pdf(ack, say, client, command):
     ack()
 
     if not verify_access_token(say):
         return
 
+    channel_id = command["channel_id"]
+    print("channel ID:", channel_id)
+
     if "text" in command:
         arg = command["text"]
         if len(arg) == 11 or len(arg) == 12:
-            if request_pdf_by_thread_id(say, arg):
+            if request_pdf_by_thread_id(say, client, channel_id, arg):
                 return
-        search_threads(say, command["text"])
+        search_threads(say, client, channel_id, command["text"])
     else:
         recent_threads(say)
 
 @app.action("export-pdf")
-def export_button_click(ack, say, body):
+def export_button_click(ack, say, client, body):
     print("=== export_button_click ===")
     ack()
 
@@ -273,10 +280,14 @@ def export_button_click(ack, say, body):
         return
 
     thread_id = body["actions"][0]["value"]
+    channel_id = body["channel"]["id"]
+
     print("Thread ID:", thread_id)
-    if not request_pdf_by_thread_id(say, thread_id):
+    print("channel ID:", channel_id)
+    if not request_pdf_by_thread_id(say, client, channel_id, thread_id):
         say("Thread ID {} not found.".format(thread_id))
 
+"""
 @app.action("download-pdf")
 def download_button_click(ack):
     print("=== download_button_click ===")
@@ -296,6 +307,7 @@ def attach_button_click(ack, say, body, client):
     print("channel ID:", channel_id)
 
     attach_pdf(say, client, pdf_url, channel_id)
+"""
 
 # Start your app
 if __name__ == "__main__":

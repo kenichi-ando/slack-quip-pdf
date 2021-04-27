@@ -176,8 +176,8 @@ def attach_pdf(say, client, pdf_url, channel_id):
         result = client.files_upload(
             channels=channel_id,
             title=unquote(file_name),
-#            file=file_path,
-            content=pdf_data,
+            file=file_path,
+#            content=pdf_data,
             filetype="pdf",
         )
         print(result)

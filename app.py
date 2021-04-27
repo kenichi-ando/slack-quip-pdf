@@ -2,8 +2,10 @@ import os
 import requests
 import json
 import time
+from urllib.parse import unquote, quote
 
 from slack_bolt import App
+from slack_sdk.errors import SlackApiError
 
 quip_access_token = None
 
@@ -55,7 +57,7 @@ def get_users(user_ids):
 
 def search_threads(say, query):
     body = request("https://platform.quip.com/1/threads/search?only_match_titles=true&count=10&query="
-            + requests.utils.quote(query)).json()
+            + quote(query)).json()
 
     if len(body) == 1:
         request_pdf(say, body[0])
@@ -121,6 +123,13 @@ def check_pdf_status(say, thread, request_id):
         text = "Download PDF"
         if status == "PARTIAL_SUCCESS":
             text += " (" + data["message"] + ")"
+
+        pdf_url = data["pdf_url"]
+        print("PDF URL original:", pdf_url)
+        file_name = quote(pdf_url[pdf_url.rindex("name=") + 5:])
+        pdf_url = pdf_url[:pdf_url.rindex("name=") + 5] + file_name
+        print("PDF URL encoded:", pdf_url)
+
         say(blocks = [
             {
                 "type": "actions",
@@ -133,14 +142,49 @@ def check_pdf_status(say, thread, request_id):
                         },
                         "action_id": "download-pdf",
                         "style": "primary",
-                        "url": data["pdf_url"]
-                    }
+                        "url": pdf_url
+                    },
+                    {
+                        "type": "button",
+                        "text": {
+                            "type": "plain_text",
+                            "text": "Attach PDF"
+                        },
+                        "action_id": "attach-pdf",
+                        "value": pdf_url
+                    },
                 ]
             }
         ])
     elif status == "FAILURE":
         say("Failed to export PDF: " + data["message"])
     return True
+
+def attach_pdf(say, client, pdf_url, channel_id):
+    file_name = pdf_url[pdf_url.rindex("name=") + 5:]
+
+    if not os.path.exists("/tmp"):
+        os.makedirs("/tmp")
+
+    file_path = "/tmp/" + file_name
+    pdf_data = request(pdf_url).content
+    with open(file_path, "wb") as file:
+        file.write(pdf_data)
+        print("File saved: ", file_path)
+
+    try:
+        result = client.files_upload(
+            channels=channel_id,
+#            content=pdfdata,
+            title=unquote(file_name),
+            file=file_path,
+            filetype="pdf",
+        )
+        print(result)
+        os.remove(file_path)
+
+    except SlackApiError as e:
+        say("Error uploading PDF: {}".format(e))
 
 def get_thread(thread_id):
     resp = request("https://platform.quip.com/1/threads/" + thread_id)
@@ -206,7 +250,7 @@ def list_threads(say, threads, header):
     say(blocks=blocks)
 
 @app.command("/quiptopdf")
-def command_quip_to_pdf(ack, say, command):
+def command_quip_to_pdf(ack, say, body, command):
     ack()
 
     if not verify_access_token(say):
@@ -222,19 +266,37 @@ def command_quip_to_pdf(ack, say, command):
         recent_threads(say)
 
 @app.action("export-pdf")
-def export_button_click(body, ack, say):
+def export_button_click(ack, say, body):
+    print("=== export_button_click ===")
     ack()
 
     if not verify_access_token(say):
         return
 
     thread_id = body["actions"][0]["value"]
+    print("Thread ID:", thread_id)
     if not request_pdf_by_thread_id(say, thread_id):
         say("Thread ID {} not found.".format(thread_id))
 
 @app.action("download-pdf")
-def download_button_click(body, ack, say):
+def download_button_click(ack):
+    print("=== download_button_click ===")
     ack()
+
+@app.action("attach-pdf")
+def attach_button_click(ack, say, body, client):
+    print("=== attach_button_click ===")
+    ack()
+
+    if not verify_access_token(say):
+        return
+
+    pdf_url = body["actions"][0]["value"]
+    channel_id = body["channel"]["id"]
+    print("URL:", pdf_url)
+    print("channel ID:", channel_id)
+
+    attach_pdf(say, client, pdf_url, channel_id)
 
 # Start your app
 if __name__ == "__main__":

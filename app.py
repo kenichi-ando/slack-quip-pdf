@@ -180,7 +180,6 @@ def attach_pdf(say, client, pdf_url, channel_id):
 #            content=pdf_data,
             filetype="pdf",
         )
-        print(result)
         os.remove(file_path)
 
     except SlackApiError as e:

@@ -132,19 +132,19 @@ def check_pdf_status(say, client, channel_id, thread, request_id):
         pdf_url = pdf_url[:pdf_url.rindex("name=") + 5] + file_name
         print("PDF URL encoded:", pdf_url)
 
-        attach_pdf(say, client, channel_id, pdf_url)
+        attach_pdf(say, client, channel_id, pdf_url, request_id)
     elif status == "FAILURE":
         say("Failed to export PDF: " + data["message"])
     return True
 
 
-def attach_pdf(say, client, channel_id, pdf_url):
+def attach_pdf(say, client, channel_id, pdf_url, request_id):
     file_name = pdf_url[pdf_url.rindex("name=") + 5:]
 
     if not os.path.exists("/tmp"):
         os.makedirs("/tmp")
 
-    file_path = "/tmp/" + str(hash(file_name))
+    file_path = "/tmp/" + request_id
     pdf_data = request(pdf_url).content
     with open(file_path, "wb") as file:
         file.write(pdf_data)

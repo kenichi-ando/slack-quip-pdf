@@ -94,7 +94,7 @@ def request_pdf(say, client, channel_id, thread):
             "type": "header",
             "text": {
                     "type": "plain_text",
-                    "text": "Exporting PDF"
+                    "text": "Exporting to PDF"
             }
         },
         {
@@ -144,7 +144,7 @@ def attach_pdf(say, client, channel_id, pdf_url):
     if not os.path.exists("/tmp"):
         os.makedirs("/tmp")
 
-    file_path = "/tmp/" + file_name
+    file_path = "/tmp/" + hash(file_name)
     pdf_data = request(pdf_url).content
     with open(file_path, "wb") as file:
         file.write(pdf_data)
@@ -220,7 +220,7 @@ def list_threads(say, threads, header):
                         "type": "button",
                         "text": {
                             "type": "plain_text",
-                            "text": "Export to PDF"
+                            "text": "Export"
                             },
                         "value": thread["thread"]["id"],
                         "action_id": "export-pdf"

@@ -166,7 +166,7 @@ def get_thread(thread_id):
 
 def get_document_info(thread):
     get_users([thread["thread"]["author_id"]])
-    return "<{}|{}> `{}` _{}_ {}".format(
+    return "<{}|{}> `{}` _{} {}_".format(
         thread["thread"]["link"],
         thread["thread"]["title"],
         thread["thread"]["id"],
@@ -175,7 +175,7 @@ def get_document_info(thread):
 
 
 def formatDate(ts):
-    return datetime.fromtimestamp(ts//1000000).strftime("%Y-%m-%d")
+    return datetime.fromtimestamp(ts//1000000).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def list_threads(say, threads, header):

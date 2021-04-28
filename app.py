@@ -25,12 +25,15 @@ def auth():
 
 
 def request(url, isPost=False):
+    if url.find("https://") == -1:
+        url = QUIP_END_POINT + url
+
     if isPost:
         print("POST " + url)
-        return requests.post(QUIP_END_POINT + url, headers=auth())
+        return requests.post(url, headers=auth())
     else:
         print("GET " + url)
-        return requests.get(QUIP_END_POINT + url, headers=auth())
+        return requests.get(url, headers=auth())
 
 
 def verify_access_token(say):
@@ -172,7 +175,7 @@ def get_document_info(thread):
 
 
 def formatDate(ts):
-    return datetime.fromtimestamp(ts//1000000).strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.fromtimestamp(ts//1000000).strftime("%Y-%m-%d")
 
 
 def list_threads(say, threads, header):

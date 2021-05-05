@@ -132,12 +132,12 @@ def check_pdf_status(say, client, channel_id, thread, request_id):
 
 
 def attach_pdf(say, client, channel_id, pdf_url, request_id):
-    file_name = pdf_url[pdf_url.rindex("name=") + 5:]
+    file_name = unquote(pdf_url[pdf_url.rindex("name=") + 5:])
 
     if not os.path.exists("/tmp"):
         os.makedirs("/tmp")
 
-    file_path = "/tmp/" + file_name + ".pdf"
+    file_path = "/tmp/" + file_name)
     pdf_data = request(pdf_url).content
     with open(file_path, "wb") as file:
         file.write(pdf_data)
@@ -146,7 +146,7 @@ def attach_pdf(say, client, channel_id, pdf_url, request_id):
     try:
         result = client.files_upload(
             channels=channel_id,
-            title=unquote(file_name),
+            title=file_name,
             file=file_path,
             filetype="pdf"
         )

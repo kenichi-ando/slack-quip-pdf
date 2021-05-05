@@ -94,8 +94,8 @@ def request_pdf(say, client, channel_id, thread):
         {
             "type": "section",
             "text": {
-                    "type": "mrkdwn",
-                    "text": get_document_info(thread)
+                "type": "mrkdwn",
+                "text": get_document_info(thread)
             },
         }
     ]
@@ -196,7 +196,10 @@ def list_threads(say, threads, header):
         blocks.append(
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": "Not found."},
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "Not found."
+                },
             })
         say(blocks=blocks)
         return
@@ -210,36 +213,24 @@ def list_threads(say, threads, header):
     for thread in threads:
         i += 1
         text = "{}. ".format(i) + get_document_info(thread)
-
-        if thread["thread"]["type"] == "document":
-            blocks.append(
-                {
-                    "type": "section",
+        blocks.append(
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": text
+                },
+                "accessory": {
+                    "type": "button",
                     "text": {
-                        "type": "mrkdwn",
-                        "text": text
-                        },
-                    "accessory": {
-                        "type": "button",
-                        "text": {
-                            "type": "plain_text",
-                            "text": "Export"
-                            },
-                        "value": thread["thread"]["id"],
-                        "action_id": "export-pdf"
-                    }
+                        "type": "plain_text",
+                        "text": "Export"
+                    },
+                    "value": thread["thread"]["id"],
+                    "action_id": "export-pdf"
                 }
-            )
-        else:
-            blocks.append(
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": text
-                        }
-                }
-            )
+            }
+        )
 
     say(blocks=blocks)
 

@@ -137,7 +137,7 @@ def attach_pdf(say, client, channel_id, pdf_url, request_id):
     if not os.path.exists("/tmp"):
         os.makedirs("/tmp")
 
-    file_path = "/tmp/" + file_name)
+    file_path = "/tmp/" + file_name
     pdf_data = request(pdf_url).content
     with open(file_path, "wb") as file:
         file.write(pdf_data)

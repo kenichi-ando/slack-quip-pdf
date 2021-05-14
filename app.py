@@ -3,11 +3,13 @@ import requests
 import json
 import time
 from urllib.parse import unquote, quote
+from datetime import datetime
 
 from slack_bolt import App
 from slack_sdk.errors import SlackApiError
 
-quip_access_token = None
+QUIP_END_POINT = "https://platform.quip.com/1/"
+QUIP_ACCESS_TOKEN = None
 
 # Initializes your app with your bot token and signing secret
 app = App(
@@ -19,10 +21,13 @@ user_id_to_name_cache = {}
 
 
 def auth():
-    return {"Authorization": "Bearer " + quip_access_token}
+    return {"Authorization": "Bearer " + QUIP_ACCESS_TOKEN}
 
 
 def request(url, isPost=False):
+    if url.find("https://") == -1:
+        url = QUIP_END_POINT + url
+
     if isPost:
         print("POST " + url)
         return requests.post(url, headers=auth())
@@ -32,13 +37,13 @@ def request(url, isPost=False):
 
 
 def verify_access_token(say):
-    global quip_access_token
+    global QUIP_ACCESS_TOKEN
 
-    if quip_access_token == None:
+    if QUIP_ACCESS_TOKEN == None:
         if os.environ.get("QUIP_ACCESS_TOKEN") != None:
-            quip_access_token = os.environ.get("QUIP_ACCESS_TOKEN")
-            if request("https://platform.quip.com/1/oauth/verify_token").status_code != 200:
-                quip_access_token = None
+            QUIP_ACCESS_TOKEN = os.environ.get("QUIP_ACCESS_TOKEN")
+            if request("oauth/verify_token").status_code != 200:
+                QUIP_ACCESS_TOKEN = None
                 say("The Quip access token is invalid.")
                 return False
         else:
@@ -56,38 +61,27 @@ def get_users(user_ids):
             request_user_ids.append(uid)
     if len(request_user_ids) == 0:
         return
-    data = request("https://platform.quip.com/1/users/?ids=" +
-                   ",".join(request_user_ids)).json()
+    data = request("users/?ids=" + ",".join(request_user_ids)).json()
     for uid in request_user_ids:
         user_id_to_name_cache[uid] = data[uid]["name"]
 
 
 def search_threads(query):
-    return request("https://platform.quip.com/1/threads/search?only_match_titles=true&count=10&query="
-                   + quote(query)).json()
+    return request("threads/search?only_match_titles=true&count=10&query=" + quote(query)).json()
 
 
 def recent_threads():
-    body = request("https://platform.quip.com/1/threads/recent").json()
+    body = request("threads/recent").json()
     return list(map(lambda tid: body[tid], body))
 
 
 def request_pdf(say, client, channel_id, thread):
-    data = request("https://platform.quip.com/1/threads/" +
-                   thread["thread"]["id"] + "/export/pdf/async", True).json()
+    data = request("threads/" + thread["thread"]["id"] + "/export/pdf/async", True).json()
     if "request_id" not in data:
         say("Failed to create a PDF.")
         return
 
     print("Request ID:", data["request_id"])
-
-    get_users([thread["thread"]["author_id"]])
-
-    text = "<{}|{}> `{}` _{}_".format(
-        thread["thread"]["link"],
-        thread["thread"]["title"],
-        thread["thread"]["id"],
-        user_id_to_name_cache[thread["thread"]["author_id"]])
 
     blocks = [
         {
@@ -100,8 +94,8 @@ def request_pdf(say, client, channel_id, thread):
         {
             "type": "section",
             "text": {
-                    "type": "mrkdwn",
-                    "text": text
+                "type": "mrkdwn",
+                "text": get_document_info(thread)
             },
         }
     ]
@@ -116,8 +110,7 @@ def request_pdf(say, client, channel_id, thread):
 
 
 def check_pdf_status(say, client, channel_id, thread, request_id):
-    data = request("https://platform.quip.com/1/threads/" +
-                   thread["thread"]["id"] + "/export/pdf/async?request_id=" + request_id).json()
+    data = request("threads/" + thread["thread"]["id"] + "/export/pdf/async?request_id=" + request_id).json()
     status = data["status"]
     if status == "PROCESSING":
         return False
@@ -140,7 +133,7 @@ def attach_pdf(say, client, channel_id, pdf_url, request_id):
     if not os.path.exists("/tmp"):
         os.makedirs("/tmp")
 
-    file_path = "/tmp/" + request_id
+    file_path = "/tmp/" + request_id + ".pdf"
     pdf_data = request(pdf_url).content
     with open(file_path, "wb") as file:
         file.write(pdf_data)
@@ -161,10 +154,24 @@ def attach_pdf(say, client, channel_id, pdf_url, request_id):
 
 
 def get_thread(thread_id):
-    resp = request("https://platform.quip.com/1/threads/" + thread_id)
+    resp = request("threads/" + thread_id)
     if resp.status_code == 200:
         return resp.json()
     return None
+
+
+def get_document_info(thread):
+    get_users([thread["thread"]["author_id"]])
+    return "<{}|{}> `{}` _{} {}_".format(
+        thread["thread"]["link"],
+        thread["thread"]["title"],
+        thread["thread"]["id"],
+        user_id_to_name_cache[thread["thread"]["author_id"]],
+        formatDate(thread["thread"]["updated_usec"]))
+
+
+def formatDate(ts):
+    return datetime.fromtimestamp(ts//1000000).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def list_threads(say, threads, header):
@@ -185,7 +192,10 @@ def list_threads(say, threads, header):
         blocks.append(
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": "Not found."},
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "Not found."
+                },
             })
         say(blocks=blocks)
         return
@@ -198,41 +208,25 @@ def list_threads(say, threads, header):
     i = 0
     for thread in threads:
         i += 1
-        text = "{}. <{}|{}> `{}` _{}_".format(
-            i,
-            thread["thread"]["link"],
-            thread["thread"]["title"],
-            thread["thread"]["id"],
-            user_id_to_name_cache[thread["thread"]["author_id"]])
-        if thread["thread"]["type"] == "document":
-            blocks.append(
-                {
-                    "type": "section",
+        text = "{}. ".format(i) + get_document_info(thread)
+        blocks.append(
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": text
+                },
+                "accessory": {
+                    "type": "button",
                     "text": {
-                        "type": "mrkdwn",
-                        "text": text
-                        },
-                    "accessory": {
-                        "type": "button",
-                        "text": {
-                            "type": "plain_text",
-                            "text": "Export"
-                            },
-                        "value": thread["thread"]["id"],
-                        "action_id": "export-pdf"
-                    }
+                        "type": "plain_text",
+                        "text": "Export"
+                    },
+                    "value": thread["thread"]["id"],
+                    "action_id": "export-pdf"
                 }
-            )
-        else:
-            blocks.append(
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": text
-                        }
-                }
-            )
+            }
+        )
 
     say(blocks=blocks)
 

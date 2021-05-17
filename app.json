@@ -1,0 +1,19 @@
+{
+    "name": "Quip to PDF Slack app",
+    "description": "This Slack app provides a slash command (/quiptopdf) to export Quip document to PDF.",
+    "repository": "https://github.com/kenichi-ando/slack-quip-pdf",
+    "env": {
+        "SLACK_SIGNING_SECRET": {
+            "description": "Slack signing secret",
+            "value": ""
+        },
+        "SLACK_BOT_TOKEN": {
+            "description": "Slack bot token",
+            "value": ""
+        },
+        "QUIP_ACCESS_TOKEN": {
+            "description": "Quip access token",
+            "value": ""
+        }
+    }
+}

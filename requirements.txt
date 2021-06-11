@@ -1,4 +1,4 @@
 requests==2.25.1
 slack-bolt==1.6.1
 slack-sdk==3.6.0
-urllib3==1.24.3
+urllib3==1.26.5
